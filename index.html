@@ -4,14 +4,15 @@
     <meta charset="UTF-8">
     <title>AI Posture Coach</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #2c3e50; color: #ecf0f1; }
-        #container { position: relative; width: 640px; height: 480px; margin-top: 20px; }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #2c3e50; color: #ecf0f1; margin: 0; padding-top: 20px;}
+        h1 { margin-bottom: 10px; }
+        #container { position: relative; width: 640px; height: 480px; }
         #video-feed, #canvas-overlay { position: absolute; top: 0; left: 0; border-radius: 8px; }
-        #feedback-box { margin-top: 520px; font-size: 2em; font-weight: bold; padding: 10px 20px; border-radius: 8px; background: #34495e; }
+        #feedback-box { margin-top: 500px; font-size: 1.8em; font-weight: bold; padding: 15px 25px; border-radius: 8px; background: #34495e; min-height: 50px; display: flex; align-items: center; justify-content: center; text-align: center;}
     </style>
 </head>
 <body>
-    <h1>AI Posture Coach</h1>
+    <h1>AI Posture Coach (Side View)</h1>
     <div id="container">
         <video id="video-feed" width="640" height="480" autoplay playsinline style="transform: scaleX(-1);"></video>
         <canvas id="canvas-overlay" width="640" height="480"></canvas>
@@ -24,71 +25,70 @@
         const ctx = canvas.getContext('2d');
         const feedbackBox = document.getElementById('feedback-box');
         
-        // --- 1. Initialize WebSocket ---
-        // Use wss:// for secure connections (HTTPS)
-        const socket = new WebSocket(`ws://${window.location.host}/ws/pose`);
+        const socket = new WebSocket(`ws://${window.location.host}/ws/posture`);
 
         socket.onopen = () => {
             console.log("WebSocket connected!");
             feedbackBox.textContent = "Stand by for analysis...";
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    video.srcObject = stream;
+                    setInterval(sendFrame, 200);
+                })
+                .catch(err => {
+                    console.error("Error accessing webcam:", err);
+                    feedbackBox.textContent = "Error: Could not access webcam.";
+                });
         };
 
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            drawSkeleton(data.keypoints);
             feedbackBox.textContent = data.feedback;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawSkeleton(data.keypoints);
         };
 
-        socket.onclose = () => {
-            console.log("WebSocket disconnected.");
+        socket.onclose = (event) => {
+            console.log("WebSocket disconnected.", event.reason);
             feedbackBox.textContent = "Connection Lost.";
         };
 
-        // --- 2. Get Webcam Feed ---
-        navigator.mediaDevices.getUserMedia({ video: true })
-            .then(stream => {
-                video.srcObject = stream;
-                // Send a frame to the backend every 200ms
-                setInterval(sendFrame, 200); 
-            })
-            .catch(err => console.error("Error accessing webcam:", err));
+        socket.onerror = (error) => {
+            console.error("WebSocket Error:", error);
+            feedbackBox.textContent = "Connection Error.";
+        };
 
-        // --- 3. Send Video Frame to Backend ---
         function sendFrame() {
-            if (socket.readyState === WebSocket.OPEN) {
-                // Draw current video frame to a temporary canvas to get the image data
+            if (socket.readyState === WebSocket.OPEN && video.readyState === 4) {
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = video.videoWidth;
                 tempCanvas.height = video.videoHeight;
                 const tempCtx = tempCanvas.getContext('2d');
-                // Flip the image horizontally to match the video feed
+                
                 tempCtx.translate(tempCanvas.width, 0);
                 tempCtx.scale(-1, 1);
                 tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
 
-                // Send as a base64 encoded JPEG
                 const dataURL = tempCanvas.toDataURL('image/jpeg', 0.8);
                 socket.send(dataURL);
             }
         }
 
-        // --- 4. Draw Skeleton on Overlay ---
+        // --- UPDATED DRAW SKELETON LOGIC ---
         function drawSkeleton(keypoints) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (!keypoints || Object.keys(keypoints).length === 0) return;
 
+            // Define the connections for a side-view skeleton
             const connections = [
-                ['left_shoulder', 'right_shoulder'], ['left_shoulder', 'left_hip'],
-                ['right_shoulder', 'right_hip'], ['left_hip', 'right_hip'],
-                ['left_shoulder', 'left_elbow'], ['left_elbow', 'left_wrist'],
-                ['right_shoulder', 'right_elbow'], ['right_elbow', 'right_wrist'],
-                ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
-                ['right_hip', 'right_knee'], ['right_knee', 'right_ankle']
+                ['EAR', 'SHOULDER'],
+                ['SHOULDER', 'HIP'],
+                ['HIP', 'KNEE']
             ];
 
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#00ff00'; // Green for lines
+            ctx.lineWidth = 5;
+            ctx.strokeStyle = '#3498db'; // Blue for lines
 
+            // Draw connections
             connections.forEach(([p1, p2]) => {
                 if (keypoints[p1] && keypoints[p2]) {
                     ctx.beginPath();
@@ -98,11 +98,13 @@
                 }
             });
 
-            ctx.fillStyle = '#ff0000'; // Red for points
+            ctx.fillStyle = '#e74c3c'; // Red for points
+            
+            // Draw keypoints
             for (const key in keypoints) {
                 const [x, y] = keypoints[key];
                 ctx.beginPath();
-                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                ctx.arc(x, y, 6, 0, 2 * Math.PI);
                 ctx.fill();
             }
         }
