@@ -8,106 +8,152 @@
         h1 { margin-bottom: 10px; }
         #container { position: relative; width: 640px; height: 480px; }
         #video-feed, #canvas-overlay { position: absolute; top: 0; left: 0; border-radius: 8px; }
-        #feedback-box { margin-top: 500px; font-size: 1.8em; font-weight: bold; padding: 15px 25px; border-radius: 8px; background: #34495e; min-height: 50px; display: flex; align-items: center; justify-content: center; text-align: center;}
+        #feedback-box { margin-top: 20px; font-size: 1.8em; font-weight: bold; padding: 15px 25px; border-radius: 8px; background: #34495e; min-height: 50px; display: flex; align-items: center; justify-content: center; text-align: center; width: 640px; box-sizing: border-box;}
+        #recalibrate-btn { margin-top: 20px; padding: 10px 20px; font-size: 1em; cursor: pointer; border-radius: 5px; border: none; background-color: #3498db; color: white;}
     </style>
 </head>
 <body>
-    <h1>AI Posture Coach (Side View)</h1>
+    <h1>AI Posture Coach (Universal)</h1>
     <div id="container">
         <video id="video-feed" width="640" height="480" autoplay playsinline style="transform: scaleX(-1);"></video>
         <canvas id="canvas-overlay" width="640" height="480"></canvas>
     </div>
     <div id="feedback-box">Connecting...</div>
+    <button id="recalibrate-btn">Recalibrate</button>
 
     <script>
-        const video = document.getElementById('video-feed');
-        const canvas = document.getElementById('canvas-overlay');
-        const ctx = canvas.getContext('2d');
-        const feedbackBox = document.getElementById('feedback-box');
-        
-        const socket = new WebSocket(`ws://${window.location.host}/ws/posture`);
+        // --- NEW: Wait for the HTML to be fully loaded before running the script ---
+        document.addEventListener('DOMContentLoaded', () => {
 
-        socket.onopen = () => {
-            console.log("WebSocket connected!");
-            feedbackBox.textContent = "Stand by for analysis...";
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    video.srcObject = stream;
-                    setInterval(sendFrame, 200);
-                })
-                .catch(err => {
-                    console.error("Error accessing webcam:", err);
-                    feedbackBox.textContent = "Error: Could not access webcam.";
-                });
-        };
-
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            feedbackBox.textContent = data.feedback;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawSkeleton(data.keypoints);
-        };
-
-        socket.onclose = (event) => {
-            console.log("WebSocket disconnected.", event.reason);
-            feedbackBox.textContent = "Connection Lost.";
-        };
-
-        socket.onerror = (error) => {
-            console.error("WebSocket Error:", error);
-            feedbackBox.textContent = "Connection Error.";
-        };
-
-        function sendFrame() {
-            if (socket.readyState === WebSocket.OPEN && video.readyState === 4) {
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = video.videoWidth;
-                tempCanvas.height = video.videoHeight;
-                const tempCtx = tempCanvas.getContext('2d');
-                
-                tempCtx.translate(tempCanvas.width, 0);
-                tempCtx.scale(-1, 1);
-                tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
-                const dataURL = tempCanvas.toDataURL('image/jpeg', 0.8);
-                socket.send(dataURL);
-            }
-        }
-
-        // --- UPDATED DRAW SKELETON LOGIC ---
-        function drawSkeleton(keypoints) {
-            if (!keypoints || Object.keys(keypoints).length === 0) return;
-
-            // Define the connections for a side-view skeleton
-            const connections = [
-                ['EAR', 'SHOULDER'],
-                ['SHOULDER', 'HIP'],
-                ['HIP', 'KNEE']
-            ];
-
-            ctx.lineWidth = 5;
-            ctx.strokeStyle = '#3498db'; // Blue for lines
-
-            // Draw connections
-            connections.forEach(([p1, p2]) => {
-                if (keypoints[p1] && keypoints[p2]) {
-                    ctx.beginPath();
-                    ctx.moveTo(keypoints[p1][0], keypoints[p1][1]);
-                    ctx.lineTo(keypoints[p2][0], keypoints[p2][1]);
-                    ctx.stroke();
-                }
-            });
-
-            ctx.fillStyle = '#e74c3c'; // Red for points
+            // All of our existing JavaScript code now goes inside here
+            const video = document.getElementById('video-feed');
+            const canvas = document.getElementById('canvas-overlay');
+            const ctx = canvas.getContext('2d');
+            const feedbackBox = document.getElementById('feedback-box');
+            const recalibrateBtn = document.getElementById('recalibrate-btn');
             
-            // Draw keypoints
-            for (const key in keypoints) {
-                const [x, y] = keypoints[key];
-                ctx.beginPath();
-                ctx.arc(x, y, 6, 0, 2 * Math.PI);
-                ctx.fill();
+            const socket = new WebSocket(`ws://${window.location.host}/ws/posture`);
+
+            // Audio Alert Setup
+            //const alertSound = new Audio('alert.mp3'); 
+            let lastAlertTime = 0;
+            const alertCooldown = 5000;
+
+            socket.onopen = () => {
+                console.log("WebSocket connected!");
+                feedbackBox.textContent = "Sit up straight for calibration...";
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then(stream => {
+                        video.srcObject = stream;
+                        setInterval(sendFrame, 100); 
+                    })
+                    .catch(err => {
+                        console.error("Error accessing webcam:", err);
+                        feedbackBox.textContent = "Error: Could not access webcam.";
+                    });
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                feedbackBox.textContent = data.feedback;
+
+                // --- Feedback Box color logic ---
+                if (data.feedback.includes("Poor") || data.feedback.includes("Uneven") || data.feedback.includes("Rounded")) {
+                    feedbackBox.style.backgroundColor = '#e74c3c'; // Red
+                    const currentTime = Date.now();
+                    if (currentTime - lastAlertTime > alertCooldown) {
+                        // alertSound.play(); // Uncomment if you have an alert.mp3 file
+                        lastAlertTime = currentTime;
+                    }
+                } else if (data.feedback.includes("Good")) {
+                    feedbackBox.style.backgroundColor = '#2ecc71'; // Green
+                } else if (data.feedback.includes("Calibrating")) {
+                    feedbackBox.style.backgroundColor = '#f39c12'; // Orange
+                } else {
+                    feedbackBox.style.backgroundColor = '#34495e'; // Default
+                }
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawSkeleton(data.keypoints);
+
+                // --- Smart Visualization Logic ---
+                if (data.view === 'SIDE' && data.keypoints.HIP && data.keypoints.SHOULDER) {
+                    drawSideAngleVisualization(data.keypoints.HIP, data.keypoints.SHOULDER, data.angle);
+                } else if (data.view === 'FRONTAL' && data.keypoints.LEFT_SHOULDER && data.keypoints.RIGHT_SHOULDER) {
+                    drawFrontalAngleVisualization(data.keypoints.LEFT_SHOULDER, data.keypoints.RIGHT_SHOULDER, data.angle);
+                }
+            };
+
+            recalibrateBtn.onclick = () => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    console.log("Requesting recalibration...");
+                    socket.send('recalibrate');
+                }
+            };
+
+            function sendFrame() {
+                if (socket.readyState === WebSocket.OPEN && video.readyState === 4) {
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = video.videoWidth;
+                    tempCanvas.height = video.videoHeight;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.translate(tempCanvas.width, 0);
+                    tempCtx.scale(-1, 1);
+                    tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    const dataURL = tempCanvas.toDataURL('image/jpeg', 0.8);
+                    socket.send(dataURL);
+                }
             }
-        }
+
+            function drawSkeleton(keypoints) {
+                if (!keypoints || Object.keys(keypoints).length === 0) return;
+                const connections = [['SHOULDER', 'HIP'], ['LEFT_SHOULDER', 'RIGHT_SHOULDER']];
+                ctx.lineWidth = 5;
+                ctx.strokeStyle = '#3498db';
+                connections.forEach(([p1, p2]) => {
+                    if (keypoints[p1] && keypoints[p2]) {
+                        ctx.beginPath();
+                        ctx.moveTo(keypoints[p1][0], keypoints[p1][1]);
+                        ctx.lineTo(keypoints[p2][0], keypoints[p2][1]);
+                        ctx.stroke();
+                    }
+                });
+                ctx.fillStyle = '#e74c3c';
+                for (const key in keypoints) {
+                    const [x, y] = keypoints[key];
+                    ctx.beginPath();
+                    ctx.arc(x, y, 6, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            }
+            
+            function drawSideAngleVisualization(hip, shoulder, angle) {
+                ctx.beginPath();
+                ctx.moveTo(hip[0], hip[1]);
+                ctx.lineTo(hip[0], hip[1] - 100);
+                ctx.strokeStyle = '#2ecc71';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                ctx.fillStyle = "white";
+                ctx.font = "bold 20px sans-serif";
+                ctx.fillText(`${angle.toFixed(1)}°`, hip[0] + 15, hip[1] - 40);
+            }
+            
+            function drawFrontalAngleVisualization(leftShoulder, rightShoulder, angle) {
+                ctx.beginPath();
+                ctx.moveTo(leftShoulder[0], leftShoulder[1]);
+                ctx.lineTo(leftShoulder[0] + 150, leftShoulder[1]);
+                ctx.strokeStyle = '#2ecc71';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                const deviation = Math.abs(180 - angle);
+                ctx.fillStyle = "white";
+                ctx.font = "bold 20px sans-serif";
+                const midX = (leftShoulder[0] + rightShoulder[0]) / 2;
+                const midY = (leftShoulder[1] + rightShoulder[1]) / 2;
+                ctx.fillText(`${deviation.toFixed(1)}°`, midX, midY - 20);
+            }
+        });
     </script>
 </body>
 </html>
